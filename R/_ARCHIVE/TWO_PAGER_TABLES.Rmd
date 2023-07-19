@@ -1,0 +1,210 @@
+---
+title: "Untitled"
+author: "Brett J. Butler"
+date: "12/10/2020"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r}
+library(tidyverse)
+library(xtable)
+wd.data <- "~/Dropbox (FFRC)/NWOS/PRODUCTS/TOOLS/TABLING/INPUTS/ESTIMATES"
+wd.ref <- "~/Dropbox (FFRC)/NWOS/PRODUCTS/TOOLS/TABLING/INPUTS/REF"
+
+forest.area <- readRDS(file.path(wd.data, "NWOS_FOREST_AREA_2018_20190909.RDS"))
+nwos <- readRDS(file.path(wd.data, "NWOS_2018_FFO_TENPLUS_20200401.RDS"))
+
+ref.label <- read_csv(file.path(wd.ref, "REF_LABEL.csv")) 
+ref.variable <- read_csv(file.path(wd.ref, "REF_VARIABLE.csv")) 
+ref.table <- read_csv(file.path(wd.ref, "REF_TABLE.csv")) 
+
+forest.area.geo <- forest.area %>% filter(STATECD == 25)
+nwos.geo <- nwos %>% filter(GEO_ABB == "MA")
+```
+
+
+```{r Forest Area, results='asis'}
+forest.area.geo.table <- forest.area.geo %>%
+  group_by(OWNGRP) %>%
+  summarize(ACRES = sum(ACRES),
+            ACRES_VARIANCE = sum(ACRES_VARIANCE),
+            .groups = "drop") %>%
+  mutate(ACRES = ACRES / 1e3,
+         SE = sqrt(ACRES_VARIANCE) / 1e3) %>%
+  select(OWNGRP, ACRES, SE)
+print(xtable(forest.area.geo.table), include.rownames = F)
+```
+
+```{r FFO Total, results='asis'}
+nwos.geo.total <- nwos.geo %>%
+  filter((VARIABLE == "TOTAL" & STATISTIC == "TOTAL" & UNITS %in% c("ACRES", "OWNERSHIPS") |
+            (VARIABLE == "OWNERS_NUMBER" & STATISTIC == "TOTAL"))) %>%
+  mutate(SE = sqrt(VARIANCE),
+         STUB = if_else(VARIABLE == "OWNERS_NUMBER", "Owners", NULL),
+         STUB = if_else(VARIABLE == "TOTAL" & UNITS == "ACRES", "Acres", STUB),
+         STUB = if_else(VARIABLE == "TOTAL" & UNITS == "OWNERSHIPS", "Ownerships", STUB),
+         STUB = factor(STUB, levels = c("Acres", "Ownerships", "Owners")),
+         VALUE = round(VALUE, -3),
+         SE = round(SE, -3)) %>%
+  select(Units = STUB, Total = VALUE, SE) %>%
+  arrange(Units)
+print(xtable(nwos.geo.total, digits = 0), format.args = list(big.mark = ","), include.rownames = F)
+```
+
+```{r FFO Size, results='asis'}
+ref.size <- ref.label %>%
+  filter(VARIABLE == "AC_WOOD_CAT") %>%
+  mutate(LEVEL = as.character(LEVEL)) %>%
+  select(LEVEL, LABEL, ORDER)
+
+nwos.geo.size <- nwos.geo %>%
+  filter(VARIABLE == "AC_WOOD_CAT", STATISTIC == "PROPORTION", UNITS %in% c("ACRES", "OWNERSHIPS"), !LEVEL %in% c("1")) %>%
+  mutate(VALUE = VALUE * 100,
+         SE = sqrt(VARIANCE) * 100) %>%
+  select(-VARIANCE) %>%
+  pivot_wider(names_from = c("UNITS"), values_from = c("VALUE", "SE")) %>%
+  left_join(ref.size, by = "LEVEL") %>%
+  arrange(ORDER) %>%
+  select("Size of Holdings (Acres)"= LABEL,
+         Acres = VALUE_ACRES, SE = SE_ACRES,
+         Ownerships = VALUE_OWNERSHIPS, "SE " = SE_OWNERSHIPS)
+          
+addtorow <- list()
+addtorow$pos <- list(0)
+addtorow$command <- c("& \\multicolumn{4}{c}{Percentage} \\\\\n")
+print(xtable(nwos.geo.size, digits = 1), add.to.row = addtorow, include.rownames = F)
+```
+
+```{r FFO OBJ, results='asis'}
+ref.obj <- ref.label %>%
+  left_join(ref.variable) %>%
+  left_join(ref.table) %>%
+  filter(grepl("OBJ_", VARIABLE)) %>%
+  select(VARIABLE, HEADER) %>%
+  distinct()
+
+nwos.geo.obj <- nwos.geo %>%
+  filter(grepl("OBJ_", VARIABLE), !VARIABLE == "OBJ_OTH", LEVEL %in% 4:5, STATISTIC == "PROPORTION", 
+         UNITS %in% c("ACRES", "OWNERSHIPS")) %>%
+  group_by(VARIABLE, UNITS) %>%
+  summarize(VALUE = sum(VALUE) * 100, 
+            SE = sqrt(sum(VARIANCE)) * 100,
+            .groups = "drop") %>%
+  pivot_wider(names_from = c("UNITS"), values_from = c("VALUE", "SE")) %>%
+  left_join(ref.obj) %>%
+  select("Objective" = HEADER,
+         Acres = VALUE_ACRES, SE = SE_ACRES,
+         Ownerships = VALUE_OWNERSHIPS, "SE " = SE_OWNERSHIPS)
+          
+addtorow <- list()
+addtorow$pos <- list(0)
+addtorow$command <- c("& \\multicolumn{4}{c}{Percentage} \\\\\n")
+print(xtable(nwos.geo.obj, digits = 1), add.to.row = addtorow, include.rownames = F)
+```
+
+```{r FFO CNC, results='asis'}
+ref.cnc <- ref.label %>%
+  left_join(ref.variable) %>%
+  left_join(ref.table) %>%
+  filter(grepl("CNC_", VARIABLE)) %>%
+  select(VARIABLE, HEADER) %>%
+  distinct()
+
+nwos.geo.cnc <- nwos.geo %>%
+  filter(grepl("CNC_", VARIABLE), !VARIABLE == "CNC_OTH", LEVEL %in% 4:5, STATISTIC == "PROPORTION", 
+         UNITS %in% c("ACRES", "OWNERSHIPS")) %>%
+  group_by(VARIABLE, UNITS) %>%
+  summarize(VALUE = sum(VALUE) * 100, 
+            SE = sqrt(sum(VARIANCE)) * 100,
+            .groups = "drop") %>%
+  pivot_wider(names_from = c("UNITS"), values_from = c("VALUE", "SE")) %>%
+  left_join(ref.cnc) %>%
+  select("Concern" = HEADER,
+         Acres = VALUE_ACRES, SE = SE_ACRES,
+         Ownerships = VALUE_OWNERSHIPS, "SE " = SE_OWNERSHIPS)
+          
+addtorow <- list()
+addtorow$pos <- list(0)
+addtorow$command <- c("& \\multicolumn{4}{c}{Percentage} \\\\\n")
+print(xtable(nwos.geo.cnc, digits = 1), add.to.row = addtorow, include.rownames = F)
+```
+
+```{r FFO ACT, results='asis'}
+ref.act <- ref.label %>%
+  filter(str_detect(VARIABLE, "^ACT_")) %>%
+  select(VARIABLE, LABEL)
+
+nwos.geo.act <- nwos.geo %>%
+  filter(str_detect(VARIABLE, "^ACT_"), !VARIABLE == "ACT_OTH", LEVEL == 1, STATISTIC == "PROPORTION", 
+        UNITS %in% c("ACRES", "OWNERSHIPS")) %>%
+  group_by(VARIABLE, UNITS) %>%
+  summarize(VALUE = sum(VALUE) * 100, 
+            SE = sqrt(sum(VARIANCE)) * 100,
+            .groups = "drop") %>%
+  pivot_wider(names_from = c("UNITS"), values_from = c("VALUE", "SE")) %>%
+  left_join(ref.act) %>%
+  select("Activity" = LABEL,
+         Acres = VALUE_ACRES, SE = SE_ACRES,
+         Ownerships = VALUE_OWNERSHIPS, "SE " = SE_OWNERSHIPS)
+          
+addtorow <- list()
+addtorow$pos <- list(0)
+addtorow$command <- c("& \\multicolumn{4}{c}{Percentage} \\\\\n")
+print(xtable(nwos.geo.act, digits = 1), add.to.row = addtorow, include.rownames = F)
+```
+
+```{r FFO PROG, results='asis'}
+ref.prog <- ref.label %>%
+  filter(VARIABLE %in% c("MAN_PLAN", "ADVICE", "TAX", "COST_5YR", "EASE",  "CERT", "CARBON")) %>%
+  left_join(ref.variable) %>%
+  left_join(ref.table) %>%
+  select(VARIABLE, TABLE_NAME) %>%
+  distinct()
+
+nwos.geo.prog <- nwos.geo %>%
+  filter(VARIABLE %in% c("MAN_PLAN", "ADVICE", "TAX", "COST_5YR", "EASE",  "CERT", "CARBON"),
+         LEVEL == 1, STATISTIC == "PROPORTION", UNITS %in% c("ACRES", "OWNERSHIPS")) %>%
+  group_by(VARIABLE, UNITS) %>%
+  summarize(VALUE = sum(VALUE) * 100, 
+            SE = sqrt(sum(VARIANCE)) * 100,
+            .groups = "drop") %>%
+  pivot_wider(names_from = c("UNITS"), values_from = c("VALUE", "SE")) %>%
+  left_join(ref.prog) %>%
+  select("Program" = TABLE_NAME,
+         Acres = VALUE_ACRES, SE = SE_ACRES,
+         Ownerships = VALUE_OWNERSHIPS, "SE " = SE_OWNERSHIPS)
+          
+addtorow <- list()
+addtorow$pos <- list(0)
+addtorow$command <- c("& \\multicolumn{4}{c}{Percentage} \\\\\n")
+print(xtable(nwos.geo.prog, digits = 1), add.to.row = addtorow, include.rownames = F)
+```
+
+```{r FFO DEM, results='asis'}
+nwos.geo.dem <- nwos.geo %>%
+  filter(((VARIABLE == "OWN1_AGE_CAT" & LEVEL %in% c(65, 75)) |
+           (VARIABLE == "OWN1_EDU" & LEVEL %in% 5:6) |
+           (VARIABLE == "OWN1_GENDER" & LEVEL %in% 1) |
+           (VARIABLE == "OWN1_RACE_WHITE" & LEVEL %in% 1)) &
+           STATISTIC == "PROPORTION" & UNITS %in% c("ACRES", "OWNERSHIPS")) %>%
+  group_by(VARIABLE, UNITS) %>%
+  summarize(VALUE = sum(VALUE) * 100, 
+            SE = sqrt(sum(VARIANCE)) * 100,
+            .groups = "drop") %>%
+  pivot_wider(names_from = c("UNITS"), values_from = c("VALUE", "SE")) %>%
+  mutate(VARIABLE = recode(VARIABLE,
+                           "OWN1_AGE_CAT" = "Age (65+)",
+                           "OWN1_EDU" = "Education (College)",
+                           "OWN1_GENDER" = "Gender (Male)",
+                           "OWN1_RACE_WHITE" = "Race (White)")) %>%
+  select("Demographic" = VARIABLE,
+         Acres = VALUE_ACRES, SE = SE_ACRES,
+         Ownerships = VALUE_OWNERSHIPS, "SE " = SE_OWNERSHIPS)
+          
+addtorow <- list()
+addtorow$pos <- list(0)
+addtorow$command <- c("& \\multicolumn{4}{c}{Percentage} \\\\\n")
+print(xtable(nwos.geo.dem, digits = 1), add.to.row = addtorow, include.rownames = F)
+```
